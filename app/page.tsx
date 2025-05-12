@@ -12,7 +12,6 @@ import { useState, useEffect } from "react";
 import { supabase, getSupabase } from "@/lib/supabase";
 import { Progress } from "@/components/ui/progress";
 
-\n
 export default function Home() {
 
   const [email, setEmail] = useState("");
