@@ -112,18 +112,18 @@ export default function Home() {
 
         // Create employee record only if user was created successfully
         if (data.user) {
-          // First need to set auth context to properly set the id
-          const session = data.session || (await supabaseClient.auth.getSession()).data.session;
-          
-          // The query will run with the user's auth context
-          const { error: employeeError } = await supabaseClient.from("employees").insert([
-            {
-              id: data.user.id, // This should match auth.uid() for RLS
-              email,
-              name,
-              role: "developer",
-            },
-          ]);
+          const { error: employeeError } = await supabaseClient
+            .from("employees")
+            .insert([
+              {
+                id: data.user.id, // This matches auth.uid() for RLS
+                email,
+                name,
+                role: "developer",
+              },
+            ])
+            .select()
+            .single();
 
           if (employeeError) throw employeeError;
           
@@ -131,6 +131,9 @@ export default function Home() {
             title: "Welcome to Game Studio Tracker!",
             description: "Your account has been created successfully.",
           });
+
+          // Redirect to dashboard after successful signup
+          router.push('/dashboard');
         } else {
           // This happens when an email confirmation is needed
           toast({
@@ -155,6 +158,9 @@ export default function Home() {
             title: "Welcome back!",
             description: "Successfully logged in to Game Studio Tracker.",
           });
+          
+          // Redirect to dashboard after successful login
+          router.push('/dashboard');
         }
       }
     } catch (error: any) {
