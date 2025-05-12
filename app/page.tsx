@@ -19,6 +19,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
+  const [lastAuthAttempt, setLastAuthAttempt] = useState<number>(0);
+  const [cooldownTime, setCooldownTime] = useState<number>(0);
   const { toast } = useToast();
 
   // Calculate password strength
@@ -84,12 +86,31 @@ export default function Home() {
     e.preventDefault();
     setIsLoading(true);
 
+    // Check if we're still in cooldown period to prevent rate limit errors
+    const now = Date.now();
+    const timeSinceLastAttempt = now - lastAuthAttempt;
+    
+    if (cooldownTime > 0 && timeSinceLastAttempt < cooldownTime) {
+      const remainingSeconds = Math.ceil((cooldownTime - timeSinceLastAttempt) / 1000);
+      toast({
+        variant: "destructive",
+        title: "Please wait",
+        description: `Too many attempts. Try again in ${remainingSeconds} seconds.`,
+      });
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // Ensure we have a valid Supabase client
       const supabaseClient = getSupabase();
       if (!supabaseClient) {
         throw new Error("Supabase client initialization failed. Check your environment variables.");
       }
+
+      // Update last attempt time
+      setLastAuthAttempt(now);
+      setCooldownTime(0);
 
       console.log(`Attempting to ${isSignUp ? 'sign up' : 'sign in'} with email: ${email}`);
 
@@ -173,11 +194,30 @@ export default function Home() {
       
       console.error(`Error code: ${errorCode}, Message: ${errorMessage}, Details: ${errorDetails}`);
       
-      toast({
-        variant: "destructive",
-        title: isSignUp ? "Sign up failed" : "Login failed",
-        description: errorMessage,
-      });
+      // Handle rate limiting errors specifically
+      if (errorCode === 'over_email_send_rate_limit' || errorMessage.includes('security purposes') || errorMessage.includes('rate limit')) {
+        // Extract the wait time from error message if available
+        let waitTime = 40000; // Default to 40 seconds if we can't parse it
+        const timeMatch = errorMessage.match(/after (\d+) seconds/);
+        if (timeMatch && timeMatch[1]) {
+          waitTime = parseInt(timeMatch[1]) * 1000 + 1000; // Add a 1 second buffer
+        }
+        
+        setCooldownTime(waitTime);
+        const waitSeconds = Math.ceil(waitTime / 1000);
+        
+        toast({
+          variant: "destructive",
+          title: "Rate limit exceeded",
+          description: `For security reasons, please wait ${waitSeconds} seconds before trying again.`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: isSignUp ? "Sign up failed" : "Login failed",
+          description: errorMessage,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -189,6 +229,32 @@ export default function Home() {
     if (passwordStrength <= 60) return "bg-yellow-500";
     if (passwordStrength <= 80) return "bg-blue-500";
     return "bg-green-500";
+  };
+
+  // Display countdown timer
+  useEffect(() => {
+    if (cooldownTime <= 0) return;
+    
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastAuthAttempt;
+      
+      if (elapsed >= cooldownTime) {
+        setCooldownTime(0);
+        clearInterval(interval);
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [cooldownTime, lastAuthAttempt]);
+  
+  // Calculate remaining cooldown time in seconds
+  const getRemainingCooldown = () => {
+    if (cooldownTime <= 0) return 0;
+    const now = Date.now();
+    const elapsed = now - lastAuthAttempt;
+    const remaining = Math.max(0, cooldownTime - elapsed);
+    return Math.ceil(remaining / 1000);
   };
 
   return (
@@ -255,12 +321,18 @@ export default function Home() {
               </div>
             </CardContent>
             <CardFooter className="flex flex-col space-y-4">
-              <Button className="w-full" type="submit" disabled={isLoading}>
+              <Button 
+                className="w-full" 
+                type="submit" 
+                disabled={isLoading || cooldownTime > 0}
+              >
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {isSignUp ? "Creating account..." : "Signing in..."}
                   </>
+                ) : cooldownTime > 0 ? (
+                  `Please wait ${getRemainingCooldown()} seconds...`
                 ) : (
                   isSignUp ? "Create Account" : "Sign In"
                 )}
