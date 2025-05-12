@@ -185,10 +185,10 @@ export default function Home() {
         // Create employee record only if user was created successfully
         if (data.user) {
           const { error: employeeError } = await supabaseClient
-            .from("employees")
+            .from(\"employees\")
             .insert([
               {
-                id: data.user.id, // This matches auth.uid() for RLS
+                id: data.user.id,
                 email,
                 name,
                 role: "developer",
