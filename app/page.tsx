@@ -103,7 +103,7 @@ export default function Home() {
     try {
       const { data: employeeData, error } = await supabase
         .from("employees")
-        .select("*")
+        .select("id, email, name, role")
         .eq("id", userId)
         .single();
 
