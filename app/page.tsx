@@ -19,8 +19,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
-  const [lastAuthAttempt, setLastAuthAttempt] = useState<number>(0);
-  const [cooldownTime, setCooldownTime] = useState<number>(0);
+  // Track rate limiting by email
+  const [rateLimitMap, setRateLimitMap] = useState<{[email: string]: {timestamp: number, cooldown: number}}>({});
   const { toast } = useToast();
 
   // Calculate password strength
@@ -86,19 +86,22 @@ export default function Home() {
     e.preventDefault();
     setIsLoading(true);
 
-    // Check if we're still in cooldown period to prevent rate limit errors
+    // Check if the email is rate-limited
     const now = Date.now();
-    const timeSinceLastAttempt = now - lastAuthAttempt;
+    const emailLimit = rateLimitMap[email];
     
-    if (cooldownTime > 0 && timeSinceLastAttempt < cooldownTime) {
-      const remainingSeconds = Math.ceil((cooldownTime - timeSinceLastAttempt) / 1000);
-      toast({
-        variant: "destructive",
-        title: "Please wait",
-        description: `Too many attempts. Try again in ${remainingSeconds} seconds.`,
-      });
-      setIsLoading(false);
-      return;
+    if (email && emailLimit) {
+      const elapsed = now - emailLimit.timestamp;
+      if (elapsed < emailLimit.cooldown) {
+        const remainingSeconds = Math.ceil((emailLimit.cooldown - elapsed) / 1000);
+        toast({
+          variant: "destructive",
+          title: "Rate limit active",
+          description: `This email address is rate-limited. Please wait ${remainingSeconds} seconds before trying again.`,
+        });
+        setIsLoading(false);
+        return;
+      }
     }
 
     try {
@@ -108,9 +111,11 @@ export default function Home() {
         throw new Error("Supabase client initialization failed. Check your environment variables.");
       }
 
-      // Update last attempt time
-      setLastAuthAttempt(now);
-      setCooldownTime(0);
+      // Track this attempt for the email
+      setRateLimitMap(prev => ({
+        ...prev,
+        [email]: { timestamp: now, cooldown: 0 }
+      }));
 
       console.log(`Attempting to ${isSignUp ? 'sign up' : 'sign in'} with email: ${email}`);
 
@@ -197,19 +202,24 @@ export default function Home() {
       // Handle rate limiting errors specifically
       if (errorCode === 'over_email_send_rate_limit' || errorMessage.includes('security purposes') || errorMessage.includes('rate limit')) {
         // Extract the wait time from error message if available
-        let waitTime = 40000; // Default to 40 seconds if we can't parse it
+        let waitTime = 45000; // Default to 45 seconds if we can't parse it
         const timeMatch = errorMessage.match(/after (\d+) seconds/);
         if (timeMatch && timeMatch[1]) {
-          waitTime = parseInt(timeMatch[1]) * 1000 + 1000; // Add a 1 second buffer
+          waitTime = parseInt(timeMatch[1]) * 1000 + 5000; // Add a 5 second buffer to be safe
         }
         
-        setCooldownTime(waitTime);
+        // Store the rate limit for this specific email
+        setRateLimitMap(prev => ({
+          ...prev,
+          [email]: { timestamp: now, cooldown: waitTime }
+        }));
+        
         const waitSeconds = Math.ceil(waitTime / 1000);
         
         toast({
           variant: "destructive",
           title: "Rate limit exceeded",
-          description: `For security reasons, please wait ${waitSeconds} seconds before trying again.`,
+          description: `For security reasons, this email address is now rate-limited. Please wait ${waitSeconds} seconds before trying again.`,
         });
       } else {
         toast({
@@ -231,29 +241,44 @@ export default function Home() {
     return "bg-green-500";
   };
 
-  // Display countdown timer
+  // Update rate limit timers
   useEffect(() => {
-    if (cooldownTime <= 0) return;
+    if (Object.keys(rateLimitMap).length === 0) return;
     
     const interval = setInterval(() => {
       const now = Date.now();
-      const elapsed = now - lastAuthAttempt;
+      let updated = false;
       
-      if (elapsed >= cooldownTime) {
-        setCooldownTime(0);
-        clearInterval(interval);
+      const newMap = {...rateLimitMap};
+      
+      // Check each email in the map
+      Object.keys(newMap).forEach(email => {
+        const data = newMap[email];
+        const elapsed = now - data.timestamp;
+        
+        if (elapsed >= data.cooldown) {
+          delete newMap[email]; // Remove rate limit when expired
+          updated = true;
+        }
+      });
+      
+      if (updated) {
+        setRateLimitMap(newMap);
       }
     }, 1000);
     
     return () => clearInterval(interval);
-  }, [cooldownTime, lastAuthAttempt]);
+  }, [rateLimitMap]);
   
-  // Calculate remaining cooldown time in seconds
+  // Calculate remaining cooldown time for current email
   const getRemainingCooldown = () => {
-    if (cooldownTime <= 0) return 0;
+    if (!email || !rateLimitMap[email]) return 0;
+    
     const now = Date.now();
-    const elapsed = now - lastAuthAttempt;
-    const remaining = Math.max(0, cooldownTime - elapsed);
+    const data = rateLimitMap[email];
+    const elapsed = now - data.timestamp;
+    const remaining = Math.max(0, data.cooldown - elapsed);
+    
     return Math.ceil(remaining / 1000);
   };
 
@@ -324,15 +349,15 @@ export default function Home() {
               <Button 
                 className="w-full" 
                 type="submit" 
-                disabled={isLoading || cooldownTime > 0}
+                disabled={isLoading || (email && rateLimitMap[email]?.cooldown > 0)}
               >
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {isSignUp ? "Creating account..." : "Signing in..."}
                   </>
-                ) : cooldownTime > 0 ? (
-                  `Please wait ${getRemainingCooldown()} seconds...`
+                ) : (email && rateLimitMap[email]?.cooldown > 0) ? (
+                  `Rate limited - wait ${getRemainingCooldown()} seconds...`
                 ) : (
                   isSignUp ? "Create Account" : "Sign In"
                 )}
