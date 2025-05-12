@@ -11,8 +11,8 @@ import { TowerControl as GameController, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase, getSupabase } from "@/lib/supabase";
 import { Progress } from "@/components/ui/progress";
-
-export default function Home() {
+\n
+export default function Home() {\n
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -21,6 +21,7 @@ export default function Home() {
   const [passwordStrength, setPasswordStrength] = useState(0);
   // Track rate limiting by email
   const [rateLimitMap, setRateLimitMap] = useState<{[email: string]: {timestamp: number, cooldown: number}}>({});
+  const [employee, setEmployee] = useState<any>(null);
   const { toast } = useToast();
 
   // Calculate password strength
@@ -81,6 +82,50 @@ export default function Home() {
 
     init();
   }, [router, toast]);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (session) {
+        // Fetch user data if a session exists
+        await fetchEmployeeData(session.user.id);
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  // Fetch employee data by id
+  const fetchEmployeeData = async (userId: string) => {
+    try {
+      const { data: employeeData, error } = await supabase
+        .from("employees")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      if (error) {
+        console.error("Error fetching employee data:", error);
+        toast({
+          variant: "destructive",
+          title: "Error fetching profile",
+          description: "Failed to load your profile data.",
+        });
+        return;
+      }
+
+      setEmployee(employeeData);
+    } catch (error: any) {
+      console.error("Unexpected error fetching employee data:", error);
+      toast({
+        variant: "destructive",
+        title: "Unexpected error",
+        description: "An unexpected error occurred while loading your profile.",
+      });
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,10 +229,10 @@ export default function Home() {
             title: "Welcome back!",
             description: "Successfully logged in to Game Studio Tracker.",
           });
-          
-          // Redirect to dashboard after successful login
-          router.push('/dashboard');
-        }
+
+            // Redirect to dashboard after successful login
+            router.push('/dashboard');
+          }
       }
     } catch (error: any) {
       console.error('Authentication error:', error);
@@ -198,7 +243,7 @@ export default function Home() {
       const errorDetails = error.details || 'No additional details';
       
       console.error(`Error code: ${errorCode}, Message: ${errorMessage}, Details: ${errorDetails}`);
-      
+
       // Handle rate limiting errors specifically
       if (errorCode === 'over_email_send_rate_limit' || errorMessage.includes('security purposes') || errorMessage.includes('rate limit')) {
         // Extract the wait time from error message if available
@@ -244,7 +289,7 @@ export default function Home() {
   // Update rate limit timers
   useEffect(() => {
     if (Object.keys(rateLimitMap).length === 0) return;
-    
+
     const interval = setInterval(() => {
       const now = Date.now();
       let updated = false;
@@ -273,7 +318,7 @@ export default function Home() {
   // Calculate remaining cooldown time for current email
   const getRemainingCooldown = () => {
     if (!email || !rateLimitMap[email]) return 0;
-    
+
     const now = Date.now();
     const data = rateLimitMap[email];
     const elapsed = now - data.timestamp;
